@@ -28,3 +28,4 @@ thiserror = "1.0"
 async-trait = "0.1"
 regex = "1.7.0"
 socket2 = { workspace = true }
+fake = "4.4.0"

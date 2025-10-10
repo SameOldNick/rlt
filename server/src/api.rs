@@ -1,4 +1,4 @@
-use actix_web::{get, web, HttpResponse, Responder};
+use actix_web::{get, post, web, HttpResponse, Responder};
 use anyhow::Result;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
@@ -17,16 +17,25 @@ pub async fn api_status() -> impl Responder {
 }
 
 /// Request proxy endpoint
-#[get("/{endpoint}")]
+#[post("/{endpoint}")]
 pub async fn request_endpoint(
     endpoint: web::Path<String>,
     info: web::Query<AuthInfo>,
     state: web::Data<State>,
 ) -> impl Responder {
-    log::debug!("Request proxy endpoint, {}", endpoint);
+    create_proxy_for(&endpoint, &info, &state).await
+}
+
+// shared logic used by both handlers
+async fn create_proxy_for(
+    endpoint: &str,
+    info: &AuthInfo,
+    state: &web::Data<State>,
+) -> HttpResponse {
+    log::debug!("Create/Request proxy endpoint, {}", endpoint);
     log::debug!("Require auth: {}", state.require_auth);
 
-    match validate_endpoint(&endpoint) {
+    match validate_endpoint(endpoint) {
         Ok(true) => (),
         Ok(false) => {
             return HttpResponse::BadRequest().body(

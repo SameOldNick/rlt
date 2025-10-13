@@ -82,13 +82,13 @@ impl ClientManager {
         }
     }
 
-    pub fn with_port_range(mut self, min_port: u16, max_port: u16) -> Self {
-        if min_port > 0 && max_port > 0 && min_port < max_port {
-            log::info!("Set proxy port range: {min_port}-{max_port}");
-            self.min_port = min_port;
-            self.max_port = max_port;
-        } else if min_port > 0 || max_port > 0 {
-            log::warn!("Invalid port range: {min_port}-{max_port}, ignore it");
+    pub fn with_port_range(mut self, start_port: u16, end_port: u16) -> Self {
+        if start_port > 0 && end_port > 0 && start_port < end_port {
+            log::info!("Set proxy port range: {start_port}-{end_port}");
+            self.start_port = start_port;
+            self.end_port = end_port;
+        } else if start_port > 0 || end_port > 0 {
+            log::warn!("Invalid port range: {start_port}-{end_port}, ignore it");
         }
 
         self

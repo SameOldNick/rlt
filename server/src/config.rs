@@ -2,8 +2,10 @@ use serde::Deserialize;
 
 #[derive(Deserialize, Debug, Default)]
 pub struct Config {
-    pub cloudflare_account: Option<String>,
-    pub cloudflare_namespace: Option<String>,
-    pub cloudflare_auth_email: Option<String>,
-    pub cloudflare_auth_key: Option<String>,
+    pub auth_type: Option<String>,
+    pub auth_api_key: Option<String>,
+    pub auth_cloudflare_account: Option<String>,
+    pub auth_cloudflare_namespace: Option<String>,
+    pub auth_cloudflare_email: Option<String>,
+    pub auth_cloudflare_key: Option<String>,
 }

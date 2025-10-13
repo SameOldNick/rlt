@@ -4,54 +4,60 @@ use async_trait::async_trait;
 use crate::error::ServerError;
 use crate::CONFIG;
 
-#[async_trait]
-pub trait Auth {
-    async fn credential_is_valid(&self, credential: &str, value: &str) -> Result<bool>;
+pub enum AuthType {
+    None,
+    ApiKey,
+    Cloudflare,
 }
 
-#[async_trait]
-impl Auth for () {
-    async fn credential_is_valid(&self, _credential: &str, _value: &str) -> Result<bool> {
-        Ok(true)
+pub fn get_auth_type() -> AuthType {
+    match CONFIG.auth_type.as_deref() {
+        Some("cloudflare") => AuthType::Cloudflare,
+        Some("api_key") => AuthType::ApiKey,
+        _ => AuthType::None,
     }
 }
 
-pub struct CfWorkerStore;
+pub async fn authenticate_cloudflare(credential: &str, value: &str) -> Result<bool> {
+    let account = CONFIG
+        .auth_cloudflare_account
+        .clone()
+        .ok_or(ServerError::InvalidConfig)?;
+    let namespace = CONFIG
+        .auth_cloudflare_namespace
+        .clone()
+        .ok_or(ServerError::InvalidConfig)?;
+    let email = CONFIG
+        .auth_cloudflare_email
+        .clone()
+        .ok_or(ServerError::InvalidConfig)?;
+    let key = CONFIG
+        .auth_cloudflare_key
+        .clone()
+        .ok_or(ServerError::InvalidConfig)?;
 
-#[async_trait]
-impl Auth for CfWorkerStore {
-    async fn credential_is_valid(&self, credential: &str, value: &str) -> Result<bool> {
-        let account = CONFIG
-            .cloudflare_account
-            .clone()
-            .ok_or(ServerError::InvalidConfig)?;
-        let namespace = CONFIG
-            .cloudflare_namespace
-            .clone()
-            .ok_or(ServerError::InvalidConfig)?;
-        let email = CONFIG
-            .cloudflare_auth_email
-            .clone()
-            .ok_or(ServerError::InvalidConfig)?;
-        let key = CONFIG
-            .cloudflare_auth_key
-            .clone()
-            .ok_or(ServerError::InvalidConfig)?;
+    let client = reqwest::Client::new();
+    let resp = client
+        .get(format!(
+            "https://api.cloudflare.com/client/v4/accounts/{}/storage/kv/namespaces/{}/values/{}",
+            account, namespace, value
+        ))
+        .header("X-Auth-Email", email)
+        .header("X-Auth-Key", key)
+        .send()
+        .await?
+        .text()
+        .await?;
+    log::info!("{:#?}", resp);
 
-        let client = reqwest::Client::new();
-        let resp = client.get(
-            format!(
-                "https://api.cloudflare.com/client/v4/accounts/{}/storage/kv/namespaces/{}/values/{}",
-                account, namespace, value
-            ))
-            .header("X-Auth-Email", email)
-            .header("X-Auth-Key", key)
-            .send()
-            .await?
-            .text()
-            .await?;
-        log::info!("{:#?}", resp);
+    Ok(credential == resp)
+}
 
-        Ok(credential == resp)
-    }
+pub async fn authenticate_api_key(credential: &str) -> Result<bool> {
+    let expected = CONFIG
+        .auth_api_key
+        .as_deref()
+        .ok_or(ServerError::InvalidConfig)?;
+
+    Ok(credential == expected)
 }

@@ -5,7 +5,7 @@ use regex::Regex;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::auth::{Auth, CfWorkerStore};
+use crate::auth::{authenticate_api_key, authenticate_cloudflare, get_auth_type};
 use crate::state::State;
 
 #[get("/api/status")]
@@ -46,7 +46,6 @@ async fn create_proxy_for(
     state: &web::Data<State>,
 ) -> HttpResponse {
     log::debug!("Create/Request proxy endpoint, {}", endpoint);
-    log::debug!("Require auth: {}", state.require_auth);
 
     match validate_endpoint(endpoint) {
         Ok(true) => (),
@@ -60,30 +59,46 @@ async fn create_proxy_for(
         }
     }
 
-    if state.require_auth {
-        let credential = match info.credential.clone() {
-            Some(val) => val,
-            None => {
-                return HttpResponse::BadRequest().body("Request Error: credential param is empty.")
-            }
-        };
+    let credential = match info.credential.clone() {
+        Some(val) => val,
+        None => {
+            return HttpResponse::BadRequest().body("Request Error: credential param is empty.")
+        }
+    };
 
-        match CfWorkerStore
-            .credential_is_valid(&credential, &endpoint)
-            .await
-        {
-            Ok(true) => (),
-            Ok(false) => {
-                return HttpResponse::BadRequest()
-                    .body("Error: credential is not valid.".to_string())
+    // Check auth and only return on failure. On success continue to create the proxy.
+    match get_auth_type() {
+        crate::auth::AuthType::None => (),
+        crate::auth::AuthType::ApiKey => {
+            match authenticate_api_key(&credential).await {
+                Ok(true) => (), // authenticated — continue
+                Ok(false) => {
+                    return HttpResponse::BadRequest()
+                        .body("Error: credential is not valid.".to_string());
+                }
+                Err(err) => {
+                    log::error!("Server error: {:?}", err);
+                    return HttpResponse::InternalServerError()
+                        .body(format!("Server Error: {:?}", err));
+                }
             }
-            Err(err) => {
-                log::error!("Server error: {:?}", err);
-                return HttpResponse::InternalServerError()
-                    .body(format!("Server Error: {:?}", err));
+        }
+
+        crate::auth::AuthType::Cloudflare => {
+            match authenticate_cloudflare(&credential, endpoint).await {
+                Ok(true) => (), // authenticated — continue
+                Ok(false) => {
+                    return HttpResponse::BadRequest()
+                        .body("Error: credential is not valid.".to_string())
+                }
+                Err(err) => {
+                    log::error!("Server error: {:?}", err);
+                    return HttpResponse::InternalServerError()
+                        .body(format!("Server Error: {:?}", err));
+                }
             }
-        };
-    }
+        }
+    };
 
     let mut manager = state.manager.lock().await;
     match manager.put(endpoint.to_string()).await {

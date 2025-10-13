@@ -4,7 +4,6 @@ use socket2::{SockRef, TcpKeepalive};
 use std::{
     collections::HashMap,
     io,
-    net::*,
     sync::Arc,
     time::{Duration, Instant},
 };
@@ -29,7 +28,6 @@ const CLEANUP_TIMEOUT: Duration = Duration::from_secs(60 * 60);
 pub struct State {
     pub manager: Arc<Mutex<ClientManager>>,
     pub max_sockets: u8,
-    pub require_auth: bool,
     pub secure: bool,
     pub domain: String,
 }

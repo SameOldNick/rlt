@@ -54,8 +54,6 @@ enum Command {
         /// The port to accept user request for proxying.
         #[clap(long, default_value = "3001")]
         proxy_port: u16,
-        #[clap(long)]
-        require_auth: bool,
         // Starting port of the range to allocate for proxying.
         #[clap(short, long, default_value = "0")]
         start_port: u16,
@@ -103,7 +101,6 @@ async fn main() -> Result<()> {
             secure,
             max_sockets,
             proxy_port,
-            require_auth,
             start_port,
             end_port,
         } => {
@@ -113,7 +110,6 @@ async fn main() -> Result<()> {
                 secure,
                 max_sockets,
                 proxy_port,
-                require_auth,
                 start_port,
                 end_port,
             };

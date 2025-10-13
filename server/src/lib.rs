@@ -42,7 +42,6 @@ pub struct ServerConfig {
     pub secure: bool,
     pub max_sockets: u8,
     pub proxy_port: u16,
-    pub require_auth: bool,
     pub start_port: u16,
     pub end_port: u16,
 }
@@ -56,18 +55,16 @@ pub async fn start(config: ServerConfig) -> Result<()> {
         secure,
         max_sockets,
         proxy_port,
-        require_auth,
         start_port,
         end_port,
     } = config;
     log::info!("Api server listens at {} {}", &domain, api_port);
     log::info!(
-        "Start proxy server at {} {}, options: {} {}, require auth: {}",
+        "Start proxy server at {} {}, options: {} {}",
         &domain,
         proxy_port,
         secure,
-        max_sockets,
-        require_auth
+        max_sockets
     );
 
     let manager = Arc::new(Mutex::new(
@@ -76,7 +73,6 @@ pub async fn start(config: ServerConfig) -> Result<()> {
     let api_state = web::Data::new(State {
         manager: manager.clone(),
         max_sockets,
-        require_auth,
         secure,
         domain,
     });

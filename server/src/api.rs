@@ -3,6 +3,7 @@ use anyhow::Result;
 use fake::Fake;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 use crate::auth::{Auth, CfWorkerStore};
 use crate::state::State;
@@ -19,24 +20,11 @@ pub async fn api_status() -> impl Responder {
 
 #[post("/")]
 pub async fn create_tunnel(info: web::Query<AuthInfo>, state: web::Data<State>) -> impl Responder {
-    use fake::faker::company::en::Bs;
+    use fake::uuid::UUIDv4;
 
-    let bs = Bs().fake::<String>();
+    let uuid: Uuid = UUIDv4.fake();
 
-    let mut slug = String::with_capacity(bs.len());
-
-    for ch in bs.chars() {
-        slug.push(if ch.is_ascii_lowercase() || ch.is_ascii_digit() {
-            ch
-        } else if ch.is_ascii_uppercase() {
-            ch.to_ascii_lowercase()
-        } else if ch.is_ascii_whitespace() {
-            '-'
-        } else {
-            // ignore other chars
-            continue;
-        });
-    }
+    let slug = &uuid.simple().to_string()[..8];
 
     create_proxy_for(&slug, &info, &state).await
 }

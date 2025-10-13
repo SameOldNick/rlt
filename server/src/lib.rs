@@ -43,6 +43,8 @@ pub struct ServerConfig {
     pub max_sockets: u8,
     pub proxy_port: u16,
     pub require_auth: bool,
+    pub start_port: u16,
+    pub end_port: u16,
 }
 
 /// Start the proxy use low level api from hyper.
@@ -55,6 +57,8 @@ pub async fn start(config: ServerConfig) -> Result<()> {
         max_sockets,
         proxy_port,
         require_auth,
+        start_port,
+        end_port,
     } = config;
     log::info!("Api server listens at {} {}", &domain, api_port);
     log::info!(
@@ -66,7 +70,9 @@ pub async fn start(config: ServerConfig) -> Result<()> {
         require_auth
     );
 
-    let manager = Arc::new(Mutex::new(ClientManager::new(max_sockets)));
+    let manager = Arc::new(Mutex::new(
+        ClientManager::new(max_sockets).with_port_range(start_port, end_port),
+    ));
     let api_state = web::Data::new(State {
         manager: manager.clone(),
         max_sockets,

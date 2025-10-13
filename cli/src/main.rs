@@ -56,6 +56,12 @@ enum Command {
         proxy_port: u16,
         #[clap(long)]
         require_auth: bool,
+        // Starting port of the range to allocate for proxying.
+        #[clap(short, long, default_value = "0")]
+        start_port: u16,
+        // Ending port of the range to allocate for proxying.
+        #[clap(short, long, default_value = "0")]
+        end_port: u16,
     },
 }
 
@@ -98,6 +104,8 @@ async fn main() -> Result<()> {
             max_sockets,
             proxy_port,
             require_auth,
+            start_port,
+            end_port,
         } => {
             let config = ServerConfig {
                 domain,
@@ -106,6 +114,8 @@ async fn main() -> Result<()> {
                 max_sockets,
                 proxy_port,
                 require_auth,
+                start_port,
+                end_port,
             };
             start(config).await?;
         }

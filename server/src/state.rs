@@ -1,11 +1,13 @@
+use port_check::*;
+use rand;
+use socket2::{SockRef, TcpKeepalive};
 use std::{
     collections::HashMap,
     io,
+    net::*,
     sync::Arc,
     time::{Duration, Instant},
 };
-
-use socket2::{SockRef, TcpKeepalive};
 use tokio::{
     io::Interest,
     net::{TcpListener, TcpStream},
@@ -36,6 +38,8 @@ pub struct ClientManager {
     pub clients: HashMap<String, Arc<Mutex<Client>>>,
     pub _tunnels: u16,
     pub default_max_sockets: u8,
+    pub start_port: u16,
+    pub end_port: u16,
 }
 
 impl ClientManager {
@@ -44,11 +48,17 @@ impl ClientManager {
             clients: HashMap::new(),
             _tunnels: 0,
             default_max_sockets: max_sockets,
+            start_port: 0,
+            end_port: 0,
         }
     }
 
     pub async fn put(&mut self, url: String) -> io::Result<u16> {
-        let client = Arc::new(Mutex::new(Client::new(self.default_max_sockets)));
+        let client = Arc::new(Mutex::new(Client::new(
+            self.default_max_sockets,
+            self.start_port,
+            self.end_port,
+        )));
         self.clients.insert(url, client.clone());
 
         let mut client = client.lock().await;
@@ -71,6 +81,18 @@ impl ClientManager {
             self.clients.remove(url.as_str());
         }
     }
+
+    pub fn with_port_range(mut self, min_port: u16, max_port: u16) -> Self {
+        if min_port > 0 && max_port > 0 && min_port < max_port {
+            log::info!("Set proxy port range: {min_port}-{max_port}");
+            self.min_port = min_port;
+            self.max_port = max_port;
+        } else if min_port > 0 || max_port > 0 {
+            log::warn!("Invalid port range: {min_port}-{max_port}, ignore it");
+        }
+
+        self
+    }
 }
 
 pub struct Client {
@@ -80,21 +102,58 @@ pub struct Client {
     listen_task: Option<JoinHandle<()>>,
     /// last time a new connection was established
     last_connection_time: Instant,
+    start_port: u16,
+    end_port: u16,
 }
 
 impl Client {
-    pub fn new(max_sockets: u8) -> Self {
+    pub fn new(max_sockets: u8, start_port: u16, end_port: u16) -> Self {
         Client {
             available_sockets: Arc::new(Mutex::new(vec![])),
             port: None,
             max_sockets,
             listen_task: None,
             last_connection_time: std::time::Instant::now(),
+            start_port,
+            end_port,
         }
     }
 
+    async fn create_listener(&self) -> io::Result<TcpListener> {
+        if self.start_port > 0 && self.end_port > 0 && self.start_port < self.end_port {
+            let limit = self.end_port - self.start_port + 1;
+            let mut count = 0;
+
+            // Pick a random port in the range that is free.
+            while count < limit {
+                let port = rand::random_range(self.start_port..=self.end_port);
+
+                if is_local_port_free(port) {
+                    let addr = format!("0.0.0.0:{}", port);
+                    let listener = TcpListener::bind(addr).await?;
+                    log::info!("Listening on {}", listener.local_addr()?);
+                    return Ok(listener);
+                }
+
+                count += 1;
+            }
+
+            log::warn!(
+                "Couldn't find a free port in the range {}-{}",
+                self.start_port,
+                self.end_port
+            );
+
+            Err(io::Error::new(
+                io::ErrorKind::AddrNotAvailable,
+                "no free port found in the range",
+            ))?;
+        }
+        TcpListener::bind("0.0.0.0:0").await
+    }
+
     pub async fn listen(&mut self) -> io::Result<u16> {
-        let listener = TcpListener::bind("0.0.0.0:0").await?;
+        let listener = self.create_listener().await?;
         let port = listener.local_addr()?.port();
         self.port = Some(port);
 

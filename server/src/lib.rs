@@ -2,9 +2,6 @@
 //! request a proxy endpoint at `domain.tld/<your-endpoint>`,
 //! user's request then proxied via `<your-endpoint>.domain.tld`.
 
-#[macro_use]
-extern crate lazy_static;
-
 use clio::Output;
 use std::io::Write;
 use std::process::{self};
@@ -18,26 +15,17 @@ use hyper::{server::conn::http1, service::service_fn};
 use tokio::{net::TcpListener, sync::Mutex, time::timeout};
 
 use crate::api::{api_status, create_tunnel, request_endpoint};
-use crate::config::Config;
 use crate::proxy::proxy_handler;
 use crate::state::{ClientManager, State};
 
 mod api;
 mod auth;
-mod config;
 mod error;
 mod proxy;
 mod state;
 
 /// The interval between cleanup checks
 const CLEANUP_CHECK_INTERVAL: Duration = Duration::from_secs(60);
-
-lazy_static! {
-    static ref CONFIG: Config = {
-        dotenv().ok();
-        envy::from_env::<Config>().unwrap_or_default()
-    };
-}
 
 pub struct ServerConfig {
     pub daemon: bool,

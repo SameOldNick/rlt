@@ -1,8 +1,6 @@
 use anyhow::Result;
 
 use crate::error::ServerError;
-use crate::CONFIG;
-
 pub enum AuthType {
     None,
     ApiKey,

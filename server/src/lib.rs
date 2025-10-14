@@ -5,6 +5,9 @@
 #[macro_use]
 extern crate lazy_static;
 
+use clio::Output;
+use std::io::Write;
+use std::process::{self};
 use std::time::Duration;
 use std::{net::SocketAddr, sync::Arc};
 
@@ -37,6 +40,12 @@ lazy_static! {
 }
 
 pub struct ServerConfig {
+    pub daemon: bool,
+    pub daemon_user: Option<String>,
+    pub daemon_group: Option<String>,
+    pub pid_file: Option<Output>,
+    pub log: Option<Output>,
+
     pub domain: String,
     pub api_port: u16,
     pub secure: bool,
@@ -62,6 +71,13 @@ pub async fn start(config: ServerConfig) -> Result<()> {
         secure,
         max_sockets,
         proxy_port,
+
+        daemon,
+        daemon_user,
+        daemon_group,
+        pid_file,
+        log,
+
         start_port,
         end_port,
         auth_type,
@@ -71,6 +87,88 @@ pub async fn start(config: ServerConfig) -> Result<()> {
         auth_cloudflare_email,
         auth_cloudflare_key,
     } = config;
+
+    if daemon {
+        #[cfg(unix)]
+        {
+            use daemonize::Daemonize;
+
+            let mut proc_stdout = std::io::stdout();
+
+            let mut daemonize = Daemonize::new();
+
+            if log.is_some() {
+                let mut log_value = log.unwrap();
+
+                if log_value.is_local() {
+                    let log_file = log_value.get_file();
+
+                    if log_file.is_none() {
+                        log::error!("Failed to open log file");
+                        process::exit(1);
+                    }
+
+                    let output = log_file.as_ref().unwrap();
+
+                    daemonize = daemonize
+                        .stdout(output.try_clone().unwrap())
+                        .stderr(output.try_clone().unwrap());
+                }
+            }
+
+            let mut is_pid_file_stdout = false;
+
+            if pid_file.is_some() {
+                let pid_value = pid_file.as_ref().unwrap();
+
+                if pid_value.is_local() {
+                    let pid_path = pid_value.path();
+
+                    let output = pid_path.to_str().unwrap();
+
+                    daemonize = daemonize.pid_file(output).chown_pid_file(true);
+                // Every method except `new` and `start`
+                } else if pid_value.is_std() {
+                    is_pid_file_stdout = true;
+                }
+            }
+
+            if daemon_user.is_some() {
+                daemonize = daemonize.user(daemon_user.as_deref().unwrap());
+            }
+
+            if daemon_group.is_some() {
+                daemonize = daemonize.group(daemon_group.as_deref().unwrap());
+            }
+
+            match daemonize.start() {
+                Ok(_) => {
+                    let child_pid = std::process::id();
+
+                    if is_pid_file_stdout {
+                        pid_file
+                            .unwrap()
+                            .write(child_pid.to_string().as_bytes())
+                            .unwrap();
+                    }
+
+                    log::info!("Success, daemonized with pid {}", child_pid);
+
+                    log::info!("Server daemonized successfully");
+                }
+                Err(e) => {
+                    log::error!("Error, {}", e);
+                    std::process::exit(1);
+                }
+            }
+        }
+        #[cfg(not(unix))]
+        {
+            log::error!("Daemon mode is only supported on Unix systems.");
+            std::process::exit(1);
+        }
+    }
+
     log::info!("Api server listens at {} {}", &domain, api_port);
     log::info!(
         "Start proxy server at {} {}, options: {} {}",

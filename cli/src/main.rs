@@ -48,6 +48,25 @@ enum Command {
         #[arg(long, short = 'c', value_parser)]
         config: Option<Input>,
 
+        /// Run the server as a daemon.
+        #[arg(long, default_value_t = false)]
+        daemon: bool,
+
+        /// User to run the daemon as (only when run as daemon).
+        #[arg(long)]
+        daemon_user: Option<String>,
+        /// Group to run the daemon as (only when run as daemon).
+        #[arg(long)]
+        daemon_group: Option<String>,
+
+        /// Path to the PID file.
+        #[arg(long)]
+        pid_file: Option<Output>,
+
+        /// Path to the log file.
+        #[arg(long)]
+        log: Option<Output>,
+
         /// Domain name of the proxy server, required if use subdomain like lt.example.com.
         #[arg(long)]
         domain: Option<String>,
@@ -147,6 +166,11 @@ async fn main() -> Result<()> {
         }
         Command::Server {
             config,
+            daemon,
+            daemon_user,
+            daemon_group,
+            pid_file,
+            log,
             domain,
             port,
             secure,
@@ -192,6 +216,11 @@ async fn main() -> Result<()> {
 
                 let server_config = ServerConfig {
                     domain: file_domain.clone().unwrap(),
+                    daemon,
+                    daemon_user,
+                    daemon_group,
+                    pid_file,
+                    log,
                     api_port: map.port,
                     secure: map.secure,
                     max_sockets: if map.max_sockets.is_some() {
@@ -229,6 +258,11 @@ async fn main() -> Result<()> {
 
                 let server_config = ServerConfig {
                     domain: domain.clone().unwrap(),
+                    daemon,
+                    daemon_user,
+                    daemon_group,
+                    pid_file,
+                    log,
                     api_port: port,
                     secure,
                     max_sockets,

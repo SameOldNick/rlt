@@ -1,5 +1,4 @@
 use anyhow::Result;
-use async_trait::async_trait;
 
 use crate::error::ServerError;
 use crate::CONFIG;
@@ -10,31 +9,43 @@ pub enum AuthType {
     Cloudflare,
 }
 
-pub fn get_auth_type() -> AuthType {
-    match CONFIG.auth_type.as_deref() {
-        Some("cloudflare") => AuthType::Cloudflare,
-        Some("api_key") => AuthType::ApiKey,
+pub struct AuthCloudflareConfig {
+    pub account: String,
+    pub namespace: String,
+    pub email: String,
+    pub key: String,
+}
+
+pub struct AuthApiConfig {
+    pub api_key: String,
+}
+
+pub fn get_auth_type(auth_type: &str) -> AuthType {
+    match auth_type {
+        "cloudflare" => AuthType::Cloudflare,
+        "api_key" => AuthType::ApiKey,
         _ => AuthType::None,
     }
 }
 
-pub async fn authenticate_cloudflare(credential: &str, value: &str) -> Result<bool> {
-    let account = CONFIG
-        .auth_cloudflare_account
-        .clone()
-        .ok_or(ServerError::InvalidConfig)?;
-    let namespace = CONFIG
-        .auth_cloudflare_namespace
-        .clone()
-        .ok_or(ServerError::InvalidConfig)?;
-    let email = CONFIG
-        .auth_cloudflare_email
-        .clone()
-        .ok_or(ServerError::InvalidConfig)?;
-    let key = CONFIG
-        .auth_cloudflare_key
-        .clone()
-        .ok_or(ServerError::InvalidConfig)?;
+pub async fn authenticate_cloudflare(
+    config: AuthCloudflareConfig,
+    credential: &str,
+    value: &str,
+) -> Result<bool> {
+    let account = config.account;
+    let namespace = config.namespace;
+    let email = config.email;
+    let key = config.key;
+
+    if account.is_empty()
+        || namespace.is_empty()
+        || email.is_empty()
+        || key.is_empty()
+        || value.is_empty()
+    {
+        return Err(ServerError::InvalidConfig.into());
+    }
 
     let client = reqwest::Client::new();
     let resp = client
@@ -53,11 +64,8 @@ pub async fn authenticate_cloudflare(credential: &str, value: &str) -> Result<bo
     Ok(credential == resp)
 }
 
-pub async fn authenticate_api_key(credential: &str) -> Result<bool> {
-    let expected = CONFIG
-        .auth_api_key
-        .as_deref()
-        .ok_or(ServerError::InvalidConfig)?;
+pub async fn authenticate_api_key(config: AuthApiConfig, credential: &str) -> Result<bool> {
+    let expected = config.api_key;
 
     Ok(credential == expected)
 }

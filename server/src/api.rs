@@ -5,7 +5,10 @@ use regex::Regex;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::auth::{authenticate_api_key, authenticate_cloudflare, get_auth_type};
+use crate::auth::{
+    authenticate_api_key, authenticate_cloudflare, get_auth_type, AuthApiConfig,
+    AuthCloudflareConfig,
+};
 use crate::state::State;
 
 #[get("/api/status")]
@@ -67,10 +70,17 @@ async fn create_proxy_for(
     };
 
     // Check auth and only return on failure. On success continue to create the proxy.
-    match get_auth_type() {
+    match get_auth_type(state.auth_type.as_str()) {
         crate::auth::AuthType::None => (),
         crate::auth::AuthType::ApiKey => {
-            match authenticate_api_key(&credential).await {
+            match authenticate_api_key(
+                AuthApiConfig {
+                    api_key: state.auth_api_key.clone(),
+                },
+                &credential,
+            )
+            .await
+            {
                 Ok(true) => (), // authenticated — continue
                 Ok(false) => {
                     return HttpResponse::BadRequest()
@@ -85,7 +95,18 @@ async fn create_proxy_for(
         }
 
         crate::auth::AuthType::Cloudflare => {
-            match authenticate_cloudflare(&credential, endpoint).await {
+            match authenticate_cloudflare(
+                AuthCloudflareConfig {
+                    account: state.auth_cloudflare_account.clone(),
+                    namespace: state.auth_cloudflare_namespace.clone(),
+                    email: state.auth_cloudflare_email.clone(),
+                    key: state.auth_cloudflare_key.clone(),
+                },
+                &credential,
+                endpoint,
+            )
+            .await
+            {
                 Ok(true) => (), // authenticated — continue
                 Ok(false) => {
                     return HttpResponse::BadRequest()

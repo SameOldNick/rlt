@@ -1,0 +1,25 @@
+# The domain name that the proxy server is running on.
+# This is required to generate the proxy endpoint url.
+domain: lt.example.com
+# The port to accept initialize proxy endpoint.
+port: 3000
+# The flag to indicate proxy over https.
+secure: false
+# Maximum number of tcp sockets each client to establish at one time.
+max_sockets: 10
+# The port to accept user request for proxying.
+proxy_port: 3001
+# Starting port of the range to allocate for proxying.
+start_port: 
+# Ending port of the range to allocate for proxying.
+end_port: 
+
+# Authentication type: none, api_key, cloudflare
+auth_type: api_key
+# If auth_type is api_key, this is required.
+auth_api_key: your_api_key
+# If auth_type is cloudflare, these are required.
+auth_cloudflare_account: your_cloudflare_account
+auth_cloudflare_namespace: your_cloudflare_namespace
+auth_cloudflare_email: your_cloudflare_email
+auth_cloudflare_key: your_cloudflare_key

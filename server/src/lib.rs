@@ -44,6 +44,13 @@ pub struct ServerConfig {
     pub proxy_port: u16,
     pub start_port: u16,
     pub end_port: u16,
+
+    pub auth_type: String,
+    pub auth_api_key: String,
+    pub auth_cloudflare_account: String,
+    pub auth_cloudflare_namespace: String,
+    pub auth_cloudflare_email: String,
+    pub auth_cloudflare_key: String,
 }
 
 /// Start the proxy use low level api from hyper.
@@ -57,6 +64,12 @@ pub async fn start(config: ServerConfig) -> Result<()> {
         proxy_port,
         start_port,
         end_port,
+        auth_type,
+        auth_api_key,
+        auth_cloudflare_account,
+        auth_cloudflare_namespace,
+        auth_cloudflare_email,
+        auth_cloudflare_key,
     } = config;
     log::info!("Api server listens at {} {}", &domain, api_port);
     log::info!(
@@ -67,6 +80,29 @@ pub async fn start(config: ServerConfig) -> Result<()> {
         max_sockets
     );
 
+    if auth_type == "none" {
+        log::warn!("No authentication is configured, anyone can create proxy endpoint!");
+    } else if auth_type == "api_key" {
+        if auth_api_key.is_empty() {
+            log::error!("Auth type api_key is selected but no api_key provided!");
+            return Err(error::ServerError::InvalidConfig.into());
+        }
+    } else if auth_type == "cloudflare" {
+        if auth_cloudflare_account.is_empty()
+            || auth_cloudflare_namespace.is_empty()
+            || auth_cloudflare_email.is_empty()
+            || auth_cloudflare_key.is_empty()
+        {
+            log::error!(
+                "Auth type cloudflare is selected but incomplete cloudflare config provided!"
+            );
+            return Err(error::ServerError::InvalidConfig.into());
+        }
+    } else {
+        log::error!("Unknown auth type: {}", auth_type);
+        return Err(error::ServerError::InvalidConfig.into());
+    }
+
     let manager = Arc::new(Mutex::new(
         ClientManager::new(max_sockets).with_port_range(start_port, end_port),
     ));
@@ -75,6 +111,13 @@ pub async fn start(config: ServerConfig) -> Result<()> {
         max_sockets,
         secure,
         domain,
+
+        auth_type,
+        auth_api_key: auth_api_key,
+        auth_cloudflare_account: auth_cloudflare_account,
+        auth_cloudflare_namespace: auth_cloudflare_namespace,
+        auth_cloudflare_email: auth_cloudflare_email,
+        auth_cloudflare_key: auth_cloudflare_key,
     });
 
     let proxy_addr: SocketAddr = ([0, 0, 0, 0], proxy_port).into();

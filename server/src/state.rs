@@ -30,6 +30,13 @@ pub struct State {
     pub max_sockets: u8,
     pub secure: bool,
     pub domain: String,
+
+    pub auth_type: String,
+    pub auth_api_key: String,
+    pub auth_cloudflare_account: String,
+    pub auth_cloudflare_namespace: String,
+    pub auth_cloudflare_email: String,
+    pub auth_cloudflare_key: String,
 }
 
 pub struct ClientManager {

@@ -1,4 +1,7 @@
-use actix_web::{get, post, web, HttpResponse, Responder};
+use actix_web::body::{BoxBody, MessageBody};
+use actix_web::dev::{ServiceRequest, ServiceResponse};
+use actix_web::middleware::{self, Next};
+use actix_web::{get, post, route, web, Error, HttpResponse, Responder};
 use anyhow::Result;
 use fake::Fake;
 use regex::Regex;
@@ -21,53 +24,63 @@ pub async fn api_status() -> impl Responder {
     HttpResponse::Ok().json(status)
 }
 
-#[post("/")]
-pub async fn create_tunnel(info: web::Query<AuthInfo>, state: web::Data<State>) -> impl Responder {
+#[route(
+    "/",
+    method = "GET",
+    method = "POST",
+    wrap = "middleware::from_fn(auth_mw)"
+)]
+pub async fn create_tunnel(state: web::Data<State>) -> impl Responder {
     use fake::uuid::UUIDv4;
 
     let uuid: Uuid = UUIDv4.fake();
 
     let slug = &uuid.simple().to_string()[..8];
 
-    create_proxy_for(&slug, &info, &state).await
+    create_proxy_for(&slug, &state).await
 }
 
 /// Request proxy endpoint
 #[post("/{endpoint}")]
 pub async fn request_endpoint(
     endpoint: web::Path<String>,
-    info: web::Query<AuthInfo>,
     state: web::Data<State>,
 ) -> impl Responder {
-    create_proxy_for(&endpoint, &info, &state).await
+    create_proxy_for(&endpoint, &state).await
 }
 
 // shared logic used by both handlers
-async fn create_proxy_for(
-    endpoint: &str,
-    info: &AuthInfo,
-    state: &web::Data<State>,
-) -> HttpResponse {
-    log::debug!("Create/Request proxy endpoint, {}", endpoint);
+async fn auth_mw(
+    req: ServiceRequest,
+    next: Next<BoxBody>,
+) -> Result<ServiceResponse<BoxBody>, Error> {
+    // pre-processing
+    let state = req
+        .app_data::<web::Data<State>>()
+        .cloned()
+        .ok_or_else(|| actix_web::error::ErrorInternalServerError("State not found"))?;
 
-    match validate_endpoint(endpoint) {
-        Ok(true) => (),
-        Ok(false) => {
-            return HttpResponse::BadRequest().body(
-                "Request subdomain is invalid, only chars in lowercase and numbers are allowed",
-            )
-        }
-        Err(err) => {
-            return HttpResponse::InternalServerError().body(format!("Server Error: {:?}", err))
-        }
-    }
+    let endpoint = req.match_info().get("endpoint").unwrap_or("");
 
-    let credential = match info.credential.clone() {
-        Some(val) => val,
-        None => {
-            return HttpResponse::BadRequest().body("Request Error: credential param is empty.")
-        }
-    };
+    let auth_header_value = req
+        .headers()
+        .get("Authorization")
+        .and_then(|val| val.to_str().ok())
+        .unwrap_or("");
+
+    let credential = req
+        .query_string()
+        .split('&')
+        .find_map(|pair| {
+            let mut iter = pair.splitn(2, '=');
+            if let (Some(key), Some(value)) = (iter.next(), iter.next()) {
+                if key == "credential" {
+                    return Some(value.to_string());
+                }
+            }
+            None
+        })
+        .unwrap_or_default();
 
     // Check auth and only return on failure. On success continue to create the proxy.
     match get_auth_type(state.auth_type.as_str()) {
@@ -77,19 +90,23 @@ async fn create_proxy_for(
                 AuthApiConfig {
                     api_key: state.auth_api_key.clone(),
                 },
-                &credential,
+                &auth_header_value,
             )
             .await
             {
                 Ok(true) => (), // authenticated — continue
                 Ok(false) => {
-                    return HttpResponse::BadRequest()
-                        .body("Error: credential is not valid.".to_string());
+                    let resp = HttpResponse::BadRequest()
+                        .body("Error: Authorization value is not valid.".to_string())
+                        .map_into_boxed_body();
+                    return Ok(req.into_response(resp));
                 }
                 Err(err) => {
                     log::error!("Server error: {:?}", err);
-                    return HttpResponse::InternalServerError()
-                        .body(format!("Server Error: {:?}", err));
+                    let resp = HttpResponse::InternalServerError()
+                        .body(format!("Server Error: {:?}", err))
+                        .map_into_boxed_body();
+                    return Ok(req.into_response(resp));
                 }
             }
         }
@@ -109,17 +126,44 @@ async fn create_proxy_for(
             {
                 Ok(true) => (), // authenticated — continue
                 Ok(false) => {
-                    return HttpResponse::BadRequest()
+                    let resp = HttpResponse::BadRequest()
                         .body("Error: credential is not valid.".to_string())
+                        .map_into_boxed_body();
+                    return Ok(req.into_response(resp));
                 }
                 Err(err) => {
                     log::error!("Server error: {:?}", err);
-                    return HttpResponse::InternalServerError()
-                        .body(format!("Server Error: {:?}", err));
+                    let resp = HttpResponse::InternalServerError()
+                        .body(format!("Server Error: {:?}", err))
+                        .map_into_boxed_body();
+                    return Ok(req.into_response(resp));
                 }
             }
         }
     };
+
+    // invoke the wrapped middleware or service
+    let res = next.call(req).await?;
+
+    // post-processing
+
+    Ok(res)
+}
+
+async fn create_proxy_for(endpoint: &str, state: &web::Data<State>) -> HttpResponse {
+    log::debug!("Create/Request proxy endpoint, {}", endpoint);
+
+    match validate_endpoint(endpoint) {
+        Ok(true) => (),
+        Ok(false) => {
+            return HttpResponse::BadRequest().body(
+                "Request subdomain is invalid, only chars in lowercase and numbers are allowed",
+            )
+        }
+        Err(err) => {
+            return HttpResponse::InternalServerError().body(format!("Server Error: {:?}", err))
+        }
+    }
 
     let mut manager = state.manager.lock().await;
     match manager.put(endpoint.to_string()).await {

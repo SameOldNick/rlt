@@ -4,6 +4,8 @@ use actix_web::middleware::{self, Next};
 use actix_web::{get, post, route, web, Error, HttpResponse, Responder};
 use anyhow::Result;
 use fake::Fake;
+use rand::rngs::OsRng;
+use rand::{Rng, TryRngCore};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -31,13 +33,12 @@ pub async fn api_status() -> impl Responder {
     wrap = "middleware::from_fn(auth_mw)"
 )]
 pub async fn create_tunnel(state: web::Data<State>) -> impl Responder {
-    use fake::uuid::UUIDv4;
+    let endpoint = generate_endpoint(
+        state.endpoint_min_length.try_into().unwrap(),
+        state.endpoint_max_length.try_into().unwrap(),
+    );
 
-    let uuid: Uuid = UUIDv4.fake();
-
-    let slug = &uuid.simple().to_string()[..8];
-
-    create_proxy_for(&slug, &state).await
+    create_proxy_for(&endpoint, &state).await
 }
 
 /// Request proxy endpoint
@@ -47,6 +48,35 @@ pub async fn request_endpoint(
     state: web::Data<State>,
 ) -> impl Responder {
     create_proxy_for(&endpoint, &state).await
+}
+
+fn generate_endpoint(min_length: u32, mut max_length: u32) -> String {
+    // sanitize lengths
+    if max_length == 0 {
+        max_length = 32;
+    }
+
+    let length = if min_length == max_length {
+        min_length as usize
+    } else {
+        let mut rng = rand::rng();
+        rng.random_range(min_length as usize..=max_length as usize)
+    };
+
+    let bytes_needed = (length + 1) / 2;
+    let mut rng = OsRng;
+    let mut buffer = vec![0u8; bytes_needed]; // Generate random bytes
+    rng.try_fill_bytes(&mut buffer)
+        .expect("Failed to generate random bytes");
+
+    let mut hex_string = String::new();
+    for byte in buffer {
+        hex_string.push_str(&format!("{:02x}", byte));
+    }
+
+    hex_string.truncate(length); // Ensure the string is of the desired length
+
+    hex_string
 }
 
 // shared logic used by both handlers

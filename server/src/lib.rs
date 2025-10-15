@@ -34,6 +34,9 @@ pub struct ServerConfig {
     pub pid_file: Option<Output>,
     pub log: Option<Output>,
 
+    pub endpoint_min_length: usize,
+    pub endpoint_max_length: usize,
+
     pub domain: String,
     pub api_port: u16,
     pub secure: bool,
@@ -59,6 +62,9 @@ pub async fn start(config: ServerConfig) -> Result<()> {
         secure,
         max_sockets,
         proxy_port,
+
+        endpoint_min_length,
+        endpoint_max_length,
 
         daemon,
         daemon_user,
@@ -197,6 +203,9 @@ pub async fn start(config: ServerConfig) -> Result<()> {
         max_sockets,
         secure,
         domain,
+
+        endpoint_min_length,
+        endpoint_max_length,
 
         auth_type,
         auth_api_key: auth_api_key,

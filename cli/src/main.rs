@@ -59,6 +59,13 @@ enum Command {
         #[arg(long)]
         daemon_group: Option<String>,
 
+        /// Minimum length of the endpoint.
+        #[arg(long, default_value = "8")]
+        endpoint_min_length: usize,
+        /// Maximum length of the endpoint.
+        #[arg(long, default_value = "32")]
+        endpoint_max_length: usize,
+
         /// Path to the PID file.
         #[arg(long)]
         pid_file: Option<Output>,
@@ -116,6 +123,10 @@ enum Command {
 struct ConfigYaml {
     domain: String,
     port: u16,
+
+    endpoint_min_length: usize,
+    endpoint_max_length: usize,
+
     secure: bool,
     max_sockets: Option<u8>,
     proxy_port: u16,
@@ -171,6 +182,8 @@ async fn main() -> Result<()> {
             daemon_group,
             pid_file,
             log,
+            endpoint_min_length,
+            endpoint_max_length,
             domain,
             port,
             secure,
@@ -216,11 +229,16 @@ async fn main() -> Result<()> {
 
                 let server_config = ServerConfig {
                     domain: file_domain.clone().unwrap(),
+
+                    endpoint_min_length: map.endpoint_min_length,
+                    endpoint_max_length: map.endpoint_max_length,
+
                     daemon,
                     daemon_user,
                     daemon_group,
                     pid_file,
                     log,
+
                     api_port: map.port,
                     secure: map.secure,
                     max_sockets: if map.max_sockets.is_some() {
@@ -258,11 +276,16 @@ async fn main() -> Result<()> {
 
                 let server_config = ServerConfig {
                     domain: domain.clone().unwrap(),
+                    endpoint_min_length,
+                    endpoint_max_length,
+
                     daemon,
                     daemon_user,
                     daemon_group,
+
                     pid_file,
                     log,
+
                     api_port: port,
                     secure,
                     max_sockets,

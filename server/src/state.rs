@@ -31,6 +31,9 @@ pub struct State {
     pub secure: bool,
     pub domain: String,
 
+    pub endpoint_min_length: usize,
+    pub endpoint_max_length: usize,
+
     pub auth_type: String,
     pub auth_api_key: String,
     pub auth_cloudflare_account: String,

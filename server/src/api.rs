@@ -66,7 +66,16 @@ async fn auth_mw(
         .headers()
         .get("Authorization")
         .and_then(|val| val.to_str().ok())
-        .unwrap_or("");
+        .and_then(|s| {
+            let mut parts = s.splitn(2, char::is_whitespace);
+            match (parts.next(), parts.next()) {
+                (Some(scheme), Some(token)) if scheme.eq_ignore_ascii_case("bearer") => {
+                    Some(token.trim().to_string())
+                }
+                _ => None,
+            }
+        })
+        .unwrap_or_default();
 
     let credential = req
         .query_string()

@@ -201,11 +201,6 @@ fn validate_endpoint(endpoint: &str) -> Result<bool> {
     Ok(re.is_match(endpoint))
 }
 
-#[derive(Debug, Deserialize)]
-pub struct AuthInfo {
-    credential: Option<String>,
-}
-
 #[derive(Debug, Serialize, Deserialize)]
 struct ApiStatus {
     tunnels_count: u16,

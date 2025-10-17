@@ -1457,6 +1457,7 @@ dependencies = [
  "regex",
  "reqwest",
  "serde",
+ "serde_json",
  "socket2 0.6.1",
  "thiserror 1.0.69",
  "tokio",

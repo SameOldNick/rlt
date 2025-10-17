@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use actix_web::body::{BoxBody, MessageBody};
 use actix_web::dev::{ServiceRequest, ServiceResponse};
 use actix_web::middleware::{self, Next};
@@ -204,8 +206,14 @@ async fn create_proxy_for(endpoint: &str, state: &web::Data<State>) -> HttpRespo
         }
     }
 
+    let secret_key = Arc::new(generate_secret_key(state.secret_key_length as usize));
+
     let mut manager = state.manager.lock().await;
-    match manager.put(endpoint.to_string()).await {
+
+    match manager
+        .put(endpoint.to_string(), secret_key.clone().to_string())
+        .await
+    {
         Ok(port) => {
             let schema = if state.secure { "https" } else { "http" };
             let info = ProxyInfo {
@@ -213,6 +221,7 @@ async fn create_proxy_for(endpoint: &str, state: &web::Data<State>) -> HttpRespo
                 port,
                 max_conn_count: state.max_sockets,
                 url: format!("{}://{}.{}", schema, endpoint, state.domain),
+                secret_key: secret_key.clone().to_string(),
             };
 
             log::debug!("Proxy info, {:?}", info);
@@ -223,6 +232,23 @@ async fn create_proxy_for(endpoint: &str, state: &web::Data<State>) -> HttpRespo
             HttpResponse::InternalServerError().body(format!("Error: {:?}", e))
         }
     }
+}
+
+fn generate_secret_key(length: usize) -> String {
+    let bytes_needed = (length + 1) / 2;
+    let mut rng = OsRng;
+    let mut buffer = vec![0u8; bytes_needed]; // Generate random bytes
+    rng.try_fill_bytes(&mut buffer)
+        .expect("Failed to generate random bytes");
+
+    let mut hex_string = String::new();
+    for byte in buffer {
+        hex_string.push_str(&format!("{:02x}", byte));
+    }
+
+    hex_string.truncate(length); // Ensure the string is of the desired length
+
+    hex_string
 }
 
 fn validate_endpoint(endpoint: &str) -> Result<bool> {
@@ -243,6 +269,7 @@ struct ProxyInfo {
     port: u16,
     max_conn_count: u8,
     url: String,
+    secret_key: String,
 }
 
 #[cfg(test)]

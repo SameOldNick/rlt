@@ -37,6 +37,8 @@ pub struct ServerConfig {
     pub endpoint_min_length: usize,
     pub endpoint_max_length: usize,
 
+    pub secret_key_length: usize,
+
     pub domain: String,
     pub api_port: u16,
     pub secure: bool,
@@ -65,6 +67,8 @@ pub async fn start(config: ServerConfig) -> Result<()> {
 
         endpoint_min_length,
         endpoint_max_length,
+
+        secret_key_length,
 
         daemon,
         daemon_user,
@@ -206,6 +210,8 @@ pub async fn start(config: ServerConfig) -> Result<()> {
 
         endpoint_min_length,
         endpoint_max_length,
+
+        secret_key_length: secret_key_length,
 
         auth_type,
         auth_api_key: auth_api_key,

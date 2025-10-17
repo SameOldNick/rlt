@@ -1,14 +1,16 @@
 use port_check::*;
 use rand;
+use serde_json::{Result as SerdeResult, Value};
 use socket2::{SockRef, TcpKeepalive};
 use std::{
     collections::HashMap,
+    error::Error,
     io,
     sync::Arc,
     time::{Duration, Instant},
 };
 use tokio::{
-    io::Interest,
+    io::{AsyncReadExt, AsyncWriteExt, Interest},
     net::{TcpListener, TcpStream},
     sync::Mutex,
     task::JoinHandle,
@@ -33,6 +35,8 @@ pub struct State {
 
     pub endpoint_min_length: usize,
     pub endpoint_max_length: usize,
+
+    pub secret_key_length: usize,
 
     pub auth_type: String,
     pub auth_api_key: String,
@@ -61,11 +65,12 @@ impl ClientManager {
         }
     }
 
-    pub async fn put(&mut self, url: String) -> io::Result<u16> {
+    pub async fn put(&mut self, url: String, secret_key: String) -> io::Result<u16> {
         let client = Arc::new(Mutex::new(Client::new(
             self.default_max_sockets,
             self.start_port,
             self.end_port,
+            secret_key,
         )));
         self.clients.insert(url, client.clone());
 
@@ -112,10 +117,11 @@ pub struct Client {
     last_connection_time: Instant,
     start_port: u16,
     end_port: u16,
+    secret_key: String,
 }
 
 impl Client {
-    pub fn new(max_sockets: u8, start_port: u16, end_port: u16) -> Self {
+    pub fn new(max_sockets: u8, start_port: u16, end_port: u16, secret_key: String) -> Self {
         Client {
             available_sockets: Arc::new(Mutex::new(vec![])),
             port: None,
@@ -124,6 +130,7 @@ impl Client {
             last_connection_time: std::time::Instant::now(),
             start_port,
             end_port,
+            secret_key,
         }
     }
 
@@ -168,60 +175,121 @@ impl Client {
         let sockets = self.available_sockets.clone();
         let max_sockets = self.max_sockets;
 
-        let listen_task = tokio::spawn(async move {
-            // TODO check client is authenticated for the port
-            loop {
-                match timeout(Duration::from_secs(20), listener.accept()).await {
-                    Ok(Ok((socket, addr))) => {
-                        log::info!("new client connection: {:?}", addr);
+        let expected_key = self.secret_key.clone();
 
-                        let mut sockets = sockets.lock().await;
-                        let sockets_len = sockets.len();
+        match timeout(Duration::from_secs(20), listener.accept()).await {
+            Ok(Ok((socket, addr))) => {
+                log::info!("new client connection: {:?}", addr);
 
-                        if sockets_len < max_sockets as usize {
-                            log::debug!("Add a new socket {}/{max_sockets}", sockets_len + 1,);
+                // clone handles for the per-connection task
+                let sockets = sockets.clone();
+                let max_sockets = max_sockets;
+                let expected_key = expected_key.clone();
 
-                            let ka = TcpKeepalive::new()
-                                .with_time(TCP_KEEPALIVE_TIME)
-                                .with_interval(TCP_KEEPALIVE_INTERVAL);
-                            #[cfg(not(target_os = "windows"))]
-                            let ka = ka.with_retries(TCP_KEEPALIVE_RETRIES);
-                            let sf = SockRef::from(&socket);
-                            if let Err(err) = sf.set_tcp_keepalive(&ka) {
-                                log::warn!("failed to enable TCP keepalive: {err}");
+                let listen_task = tokio::spawn(async move {
+                    // configure keepalive first
+                    let ka = TcpKeepalive::new()
+                        .with_time(TCP_KEEPALIVE_TIME)
+                        .with_interval(TCP_KEEPALIVE_INTERVAL);
+                    #[cfg(not(target_os = "windows"))]
+                    let ka = ka.with_retries(TCP_KEEPALIVE_RETRIES);
+                    let sf = SockRef::from(&socket);
+                    if let Err(err) = sf.set_tcp_keepalive(&ka) {
+                        log::warn!("failed to enable TCP keepalive: {err}");
+                    }
+
+                    // perform auth with a timeout to avoid blocking forever
+                    let mut s = socket;
+                    match tokio::time::timeout(
+                        Duration::from_secs(5),
+                        Client::auth_check(&mut s, &expected_key),
+                    )
+                    .await
+                    {
+                        Ok(Ok(())) => {
+                            // auth succeeded — push socket if there's capacity
+                            let mut guard = sockets.lock().await;
+                            if guard.len() < max_sockets as usize {
+                                log::debug!("Add a new socket {}/{}", guard.len() + 1, max_sockets);
+                                guard.push(s);
+                            } else {
+                                log::warn!("Reached sockets max: {}/{}", guard.len(), max_sockets);
+                                // socket dropped here
                             }
-
-                            sockets.push(socket)
-                        } else {
-                            log::warn!("Reached sockets max: {sockets_len}/{max_sockets}");
+                        }
+                        Ok(Err(err)) => {
+                            log::warn!("authentication failed for {:?}: {}", addr, err);
+                            // drop socket
+                        }
+                        Err(_) => {
+                            log::warn!("authentication timed out for {:?}", addr);
+                            // drop socket
                         }
                     }
-                    Ok(Err(e)) => log::info!("Couldn't get client: {:?}", e),
-                    Err(_) => {
-                        // timeout clean up timeout connections
-                        let mut sockets = sockets.lock().await;
-                        let sockets_len = sockets.len();
-                        let mut connected_sockets = vec![];
-                        while let Some(s) = sockets.pop() {
-                            if socket_is_writable(&s).await {
-                                connected_sockets.push(s);
-                            }
-                        }
+                });
 
-                        if sockets_len != connected_sockets.len() {
-                            log::debug!(
-                                "removed {} old disconnected sockets",
-                                sockets_len - connected_sockets.len()
-                            );
-                        }
-                        *sockets = connected_sockets;
+                self.listen_task = Some(listen_task);
+            }
+            Ok(Err(e)) => log::info!("Couldn't get client: {:?}", e),
+            Err(e) => {
+                log::info!("Timed out waiting for client: {:?}", e);
+
+                // timeout clean up timeout connections
+                let mut sockets = sockets.lock().await;
+                let sockets_len = sockets.len();
+                let mut connected_sockets = vec![];
+                while let Some(s) = sockets.pop() {
+                    if socket_is_writable(&s).await {
+                        connected_sockets.push(s);
                     }
                 }
+
+                if sockets_len != connected_sockets.len() {
+                    log::debug!(
+                        "removed {} old disconnected sockets",
+                        sockets_len - connected_sockets.len()
+                    );
+                }
+                *sockets = connected_sockets;
             }
-        });
-        self.listen_task = Some(listen_task);
+        }
 
         Ok(port)
+    }
+
+    async fn auth_check(socket: &mut TcpStream, expected: &str) -> Result<(), String> {
+        log::info!("Checking authentication for {:?}", socket.peer_addr());
+
+        let mut contents = String::new();
+
+        socket.read_to_string(&mut contents).await.unwrap();
+
+        log::info!("Authentication contents: {}", contents);
+
+        let parsed: Value = serde_json::from_str(&contents).unwrap();
+
+        let type_is_auth = parsed
+            .get("type")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            == "auth";
+        let has_key = parsed.get("key").is_some();
+
+        if !type_is_auth || !has_key {
+            return Err("The type and key is missing".into());
+        }
+
+        let key = parsed
+            .get("key")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default();
+
+        if key != expected {
+            return Err("The key is invalid".into());
+        }
+
+        log::info!("Authentication succeeded for {:?}", socket.peer_addr());
+        Ok(())
     }
 
     pub async fn take(&mut self) -> Option<TcpStream> {

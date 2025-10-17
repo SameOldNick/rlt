@@ -66,6 +66,10 @@ enum Command {
         #[arg(long, default_value = "32")]
         endpoint_max_length: usize,
 
+        /// Length of the secret key.
+        #[arg(long, default_value = "32")]
+        secret_key_length: usize,
+
         /// Path to the PID file.
         #[arg(long)]
         pid_file: Option<Output>,
@@ -127,6 +131,8 @@ struct ConfigYaml {
     endpoint_min_length: usize,
     endpoint_max_length: usize,
 
+    secret_key_length: usize,
+
     secure: bool,
     max_sockets: Option<u8>,
     proxy_port: u16,
@@ -184,6 +190,7 @@ async fn main() -> Result<()> {
             log,
             endpoint_min_length,
             endpoint_max_length,
+            secret_key_length,
             domain,
             port,
             secure,
@@ -233,6 +240,8 @@ async fn main() -> Result<()> {
                     endpoint_min_length: map.endpoint_min_length,
                     endpoint_max_length: map.endpoint_max_length,
 
+                    secret_key_length: map.secret_key_length,
+
                     daemon,
                     daemon_user,
                     daemon_group,
@@ -278,6 +287,8 @@ async fn main() -> Result<()> {
                     domain: domain.clone().unwrap(),
                     endpoint_min_length,
                     endpoint_max_length,
+
+                    secret_key_length,
 
                     daemon,
                     daemon_user,

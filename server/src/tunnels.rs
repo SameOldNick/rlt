@@ -27,6 +27,7 @@ pub struct Allowed {
 
 pub struct Tunnels {
     pub port: u16,
+    pub max_per_endpoint: usize,
     pub allowed: Arc<AsyncRwLock<HashMap<String, Arc<AsyncMutex<Allowed>>>>>,
     pub tunnels: Arc<AsyncMutex<Vec<Tunnel>>>,
 
@@ -34,9 +35,10 @@ pub struct Tunnels {
 }
 
 impl Tunnels {
-    pub fn new(port: u16) -> Self {
+    pub fn new(port: u16, max_per_endpoint: usize) -> Self {
         Tunnels {
             port,
+            max_per_endpoint,
             tunnels: Arc::new(AsyncMutex::new(Vec::new())),
             allowed: Arc::new(AsyncRwLock::new(HashMap::new())),
             accept_handle: None,
@@ -82,6 +84,8 @@ impl Tunnels {
         let allowed = Arc::clone(&self.allowed);
         let tunnels = Arc::clone(&self.tunnels);
 
+        let max_per_endpoint = self.max_per_endpoint;
+
         self.accept_handle = Some(tokio::spawn(async move {
             loop {
                 match listener.accept().await {
@@ -109,6 +113,33 @@ impl Tunnels {
                                     let endpoint = allowed_guard.endpoint.clone();
 
                                     log::info!("Authorized tunnel for endpoint: {}", endpoint);
+
+                                    let tunnels_guard = tunnels.lock().await;
+                                    let mut current = 0usize;
+                                    for t in tunnels_guard.iter() {
+                                        if t.endpoint == endpoint {
+                                            if socket_is_writable(&t.stream).await {
+                                                current += 1;
+                                            }
+                                        }
+                                    }
+
+                                    if current >= max_per_endpoint {
+                                        log::warn!(
+                                            "Endpoint '{}' reached max sockets {}/{} - rejecting",
+                                            endpoint,
+                                            current,
+                                            max_per_endpoint
+                                        );
+                                        // politely notify client and drop connection
+                                        if let Err(err) =
+                                            send_auth_failure(&mut stream, "Too many connections")
+                                                .await
+                                        {
+                                            log::warn!("failed to send overflow response: {}", err);
+                                        }
+                                        continue;
+                                    }
 
                                     if let Err(e) = send_auth_success(&mut stream).await {
                                         log::warn!("failed to send auth success: {}", e);

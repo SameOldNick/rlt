@@ -200,7 +200,7 @@ pub async fn start(config: ServerConfig) -> Result<()> {
         return Err(error::ServerError::InvalidConfig.into());
     }
 
-    let tunnels = Arc::new(Mutex::new(Tunnels::new(tunnel_port)));
+    let tunnels = Arc::new(Mutex::new(Tunnels::new(tunnel_port, max_sockets as usize)));
 
     let tunnels_for_listen = Arc::clone(&tunnels);
 

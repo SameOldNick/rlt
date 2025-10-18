@@ -14,6 +14,9 @@ start_port:
 # Ending port of the range to allocate for proxying.
 end_port: 
 
+# Length of the secret key.
+secret_key_length: 32
+
 # Minimum and maximum length of the endpoint.
 endpoint_min_length: 8
 # Maximum length of the endpoint.

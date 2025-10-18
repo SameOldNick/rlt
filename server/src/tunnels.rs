@@ -79,7 +79,9 @@ impl Tunnels {
     }
 
     pub async fn listen(&mut self) -> Result<(), std::io::Error> {
-        let listener = TcpListener::bind(format!("0.0.0.0:{}", self.port)).await?;
+        let port = self.port;
+
+        let listener = TcpListener::bind(format!("0.0.0.0:{}", port)).await?;
 
         let allowed = Arc::clone(&self.allowed);
         let tunnels = Arc::clone(&self.tunnels);
@@ -88,6 +90,8 @@ impl Tunnels {
 
         self.accept_handle = Some(tokio::spawn(async move {
             loop {
+                log::info!("Waiting for new tunnel connections on port {}", port);
+
                 match listener.accept().await {
                     Ok((mut stream, _)) => {
                         log::info!("Accepted a new tunnel connection");

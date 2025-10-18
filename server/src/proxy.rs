@@ -15,7 +15,7 @@ use crate::{error::ServerError, tunnels::Tunnels};
 /// Reverse proxy handler
 pub async fn proxy_handler(
     mut req: Request<Incoming>,
-    tunnels: &tokio::sync::Mutex<Tunnels>,
+    tunnels: Arc<Mutex<Tunnels>>,
 ) -> Result<Response<Incoming>> {
     let host_header = req.headers().get(HOST).ok_or(ServerError::NoHostHeader)?;
     let hostname = host_header.to_str()?;
@@ -24,10 +24,8 @@ pub async fn proxy_handler(
     let endpoint = extract(hostname)?;
 
     let client_stream = {
-        // lock the tunnels guard first
-        let mut guard = tunnels.lock().await;
         // call the synchronous `take` on the guard (no `.await` here)
-        let tunnel = guard.take_tunnel(endpoint.as_str()).await;
+        let tunnel = tunnels.lock().await.take_tunnel(endpoint.as_str()).await;
 
         match tunnel {
             Some(tunnel) => tunnel.stream,

@@ -200,8 +200,13 @@ pub async fn start(config: ServerConfig) -> Result<()> {
         return Err(error::ServerError::InvalidConfig.into());
     }
 
-    let tunnels = Arc::new(Mutex::new(Tunnels::new(tunnel_port, max_sockets as usize)));
+    // make tunnels an Arc<Mutex<Tunnels>> so we can mutate it from async tasks
+    let tunnels = Arc::new(tokio::sync::Mutex::new(Tunnels::new(
+        tunnel_port,
+        max_sockets as usize,
+    )));
 
+    // spawn the listener task which locks the mutex and runs listen()
     let tunnels_for_listen = Arc::clone(&tunnels);
     tokio::spawn(async move {
         let mut guard = tunnels_for_listen.lock().await;
@@ -247,7 +252,7 @@ pub async fn start(config: ServerConfig) -> Result<()> {
 
                     let service = service_fn(move |req| {
                         let tunnels = Arc::clone(&tunnels_for_service);
-                        async move { proxy_handler(req, &tunnels).await }
+                        async move { proxy_handler(req, tunnels).await }
                     });
 
                     tokio::spawn(async move {
@@ -263,8 +268,7 @@ pub async fn start(config: ServerConfig) -> Result<()> {
                 Ok(Err(e)) => log::error!("Failed to accept the request: {:?}", e),
                 Err(_) => {
                     // timeout, cleanup old connections
-                    let mut tunnels = tunnels.lock().await;
-                    tunnels.shutdown().await;
+                    //tunnels.shutdown().await;
                 }
             }
         }

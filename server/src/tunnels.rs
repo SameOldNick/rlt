@@ -91,7 +91,21 @@ impl Tunnels {
     pub async fn listen(&mut self) -> Result<(), std::io::Error> {
         let port = self.port;
 
-        let listener = TcpListener::bind(format!("0.0.0.0:{}", port)).await?;
+        log::info!("Tunnels::listen - binding to 0.0.0.0:{}", port);
+        let listener = match TcpListener::bind(format!("0.0.0.0:{}", port)).await {
+            Ok(l) => {
+                if let Ok(addr) = l.local_addr() {
+                    log::info!("Tunnels::listen - bound to {}", addr);
+                } else {
+                    log::info!("Tunnels::listen - bound but local_addr() failed");
+                }
+                l
+            }
+            Err(e) => {
+                log::error!("Tunnels::listen - bind failed: {}", e);
+                return Err(e);
+            }
+        };
 
         let allowed = Arc::clone(&self.allowed);
         let tunnels = Arc::clone(&self.tunnels);
@@ -99,8 +113,10 @@ impl Tunnels {
         let max_per_endpoint = self.max_per_endpoint;
 
         self.accept_handle = Some(tokio::spawn(async move {
+            // protect the accept loop so panics/errors are visible
+            log::info!("Accept loop started for port {}", port);
             loop {
-                log::info!("Waiting for new tunnel connections on port {}", port);
+                log::debug!("Waiting for new tunnel connections on port {}", port);
 
                 match listener.accept().await {
                     Ok((mut stream, _)) => {

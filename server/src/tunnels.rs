@@ -1,12 +1,12 @@
+use crate::tunnel::Tunnel;
+use dashmap::DashMap;
+use serde_json::Value;
+use socket2::{SockRef, TcpKeepalive};
 use std::{
     collections::HashMap,
     sync::{Arc, Mutex},
     time::Duration,
 };
-
-use crate::tunnel::Tunnel;
-use serde_json::Value;
-use socket2::{SockRef, TcpKeepalive};
 use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader, Interest},
     net::{TcpListener, TcpStream},
@@ -29,7 +29,7 @@ pub struct Tunnels {
     pub port: u16,
     pub max_per_endpoint: usize,
     pub allowed: Arc<AsyncRwLock<HashMap<String, Arc<AsyncMutex<Allowed>>>>>,
-    pub tunnels: Arc<AsyncMutex<Vec<Tunnel>>>,
+    pub tunnels: Arc<DashMap<String, Arc<AsyncMutex<Vec<Tunnel>>>>>,
 
     accept_handle: Option<JoinHandle<()>>,
 }
@@ -39,7 +39,7 @@ impl Tunnels {
         Tunnels {
             port,
             max_per_endpoint,
-            tunnels: Arc::new(AsyncMutex::new(Vec::new())),
+            tunnels: Arc::new(DashMap::new()),
             allowed: Arc::new(AsyncRwLock::new(HashMap::new())),
             accept_handle: None,
         }
@@ -56,25 +56,35 @@ impl Tunnels {
         w.insert(key, Arc::new(AsyncMutex::new(allowed)));
     }
 
-    pub async fn take(&mut self, endpoint: &str) -> Option<Tunnel> {
-        let mut tunnels = self.tunnels.lock().await;
+    pub async fn push_tunnel(&self, endpoint: &str, tunnel: Tunnel) {
+        let entry = self
+            .tunnels
+            .entry(endpoint.to_string())
+            .or_insert_with(|| Arc::new(AsyncMutex::new(Vec::new())));
+        let list_arc = entry.value().clone();
+        let mut guard = list_arc.lock().await;
+        guard.push(tunnel);
+    }
 
-        loop {
-            if tunnels.is_empty() {
-                break;
-            }
-
-            if let Some(pos) = tunnels.iter().position(|t| t.endpoint == endpoint) {
-                let tunnel = tunnels.remove(pos);
-
-                if socket_is_writable(&tunnel.stream).await {
-                    return Some(tunnel);
+    pub async fn take_tunnel(&mut self, endpoint: &str) -> Option<Tunnel> {
+        if let Some(entry) = self.tunnels.get(endpoint) {
+            let list_arc = entry.value().clone();
+            let mut guard = list_arc.lock().await;
+            loop {
+                if guard.is_empty() {
+                    break;
                 }
-            } else {
-                break;
+                if let Some(pos) = guard.iter().position(|t| t.endpoint == endpoint) {
+                    let tunnel = guard.remove(pos);
+                    if socket_is_writable(&tunnel.stream).await {
+                        return Some(tunnel);
+                    }
+                    // otherwise continue loop to drop dead sockets
+                } else {
+                    break;
+                }
             }
         }
-
         None
     }
 
@@ -118,21 +128,29 @@ impl Tunnels {
 
                                     log::info!("Authorized tunnel for endpoint: {}", endpoint);
 
-                                    let tunnels_guard = tunnels.lock().await;
-                                    let mut current = 0usize;
-                                    for t in tunnels_guard.iter() {
-                                        if t.endpoint == endpoint {
-                                            if socket_is_writable(&t.stream).await {
-                                                current += 1;
-                                            }
+                                    // get or create the per-endpoint list (Arc<AsyncMutex<Vec<Tunnel>>>)
+                                    let entry = tunnels
+                                        .entry(endpoint.clone())
+                                        .or_insert_with(|| Arc::new(AsyncMutex::new(Vec::new())));
+                                    let list_arc = entry.value().clone();
+
+                                    let mut list = list_arc.lock().await;
+
+                                    let mut count = 0usize;
+
+                                    for t in list.iter() {
+                                        if t.endpoint == endpoint
+                                            && socket_is_writable(&t.stream).await
+                                        {
+                                            count += 1;
                                         }
                                     }
 
-                                    if current >= max_per_endpoint {
+                                    if count >= max_per_endpoint {
                                         log::warn!(
                                             "Endpoint '{}' reached max sockets {}/{} - rejecting",
                                             endpoint,
-                                            current,
+                                            count,
                                             max_per_endpoint
                                         );
                                         // politely notify client and drop connection
@@ -151,8 +169,9 @@ impl Tunnels {
                                     }
 
                                     // Put socket into shared pool
-                                    let mut tunnels_guard = tunnels.lock().await;
-                                    tunnels_guard.push(Tunnel::new(stream, endpoint));
+                                    let tunnel = Tunnel::new(stream, endpoint);
+                                    list.push(tunnel);
+                                    //self.push_tunnel(&endpoint, tunnel);
                                 } else {
                                     log::warn!("Unauthorized tunnel attempt with key: {}", key);
                                     let _ =
@@ -182,17 +201,20 @@ impl Tunnels {
     }
 
     pub async fn shutdown(&mut self) {
-        for tunnel in self.tunnels.lock().await.iter_mut() {
-            if let Err(e) = tunnel.stream.shutdown().await {
-                log::warn!("failed to shutdown tunnel stream: {}", e);
+        // Iterate through all per-endpoint lists and shut down each tunnel's stream.
+        for entry in self.tunnels.iter() {
+            let list_arc = entry.value().clone();
+            let mut guard = list_arc.lock().await;
+            for tunnel in guard.iter_mut() {
+                if let Err(e) = tunnel.stream.shutdown().await {
+                    log::warn!("failed to shutdown tunnel stream: {}", e);
+                }
             }
         }
 
         if let Some(handle) = self.accept_handle.take() {
             handle.abort();
             log::info!("Tunnel listener on port {} has been shut down.", self.port);
-
-            self.accept_handle = None;
         }
     }
 }

@@ -244,8 +244,11 @@ pub async fn start(config: ServerConfig) -> Result<()> {
                     log::info!("Accepted a new proxy request");
 
                     let tunnels_for_service = Arc::clone(&tunnels);
-                    let service =
-                        service_fn(move |req| proxy_handler(req, tunnels_for_service.clone()));
+
+                    let service = service_fn(move |req| {
+                        let tunnels = Arc::clone(&tunnels_for_service);
+                        async move { proxy_handler(req, &tunnels).await }
+                    });
 
                     tokio::spawn(async move {
                         if let Err(err) = http1::Builder::new()

@@ -15,7 +15,7 @@ use crate::{error::ServerError, tunnels::Tunnels};
 /// Reverse proxy handler
 pub async fn proxy_handler(
     mut req: Request<Incoming>,
-    tunnels: Arc<Mutex<Tunnels>>,
+    tunnels: &tokio::sync::Mutex<Tunnels>,
 ) -> Result<Response<Incoming>> {
     let host_header = req.headers().get(HOST).ok_or(ServerError::NoHostHeader)?;
     let hostname = host_header.to_str()?;
@@ -24,14 +24,20 @@ pub async fn proxy_handler(
     let endpoint = extract(hostname)?;
 
     let client_stream = {
-        let mut tunnels = tunnels.lock().await;
+        // lock the tunnels guard first
+        let mut guard = tunnels.lock().await;
+        // call the synchronous `take` on the guard (no `.await` here)
+        let tunnel = guard.take_tunnel(endpoint.as_str()).await;
 
-        tunnels
-            .take(endpoint.as_str())
-            .await
-            .ok_or(ServerError::EmptyConnection)?
-            .stream
+        match tunnel {
+            Some(tunnel) => tunnel.stream,
+            None => {
+                log::warn!("No available tunnel for endpoint: {}", endpoint);
+                return Err(ServerError::EmptyConnection.into());
+            }
+        }
     };
+
     let client_stream = hyper_util::rt::TokioIo::new(client_stream);
 
     if !req.headers().contains_key(UPGRADE) {

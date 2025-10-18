@@ -203,9 +203,13 @@ pub async fn start(config: ServerConfig) -> Result<()> {
     let tunnels = Arc::new(Mutex::new(Tunnels::new(tunnel_port, max_sockets as usize)));
 
     let tunnels_for_listen = Arc::clone(&tunnels);
-
-    let mut guard = tunnels_for_listen.lock().await;
-    guard.listen().await?;
+    tokio::spawn(async move {
+        let mut guard = tunnels_for_listen.lock().await;
+        if let Err(err) = guard.listen().await {
+            log::error!("tunnels.listen() failed: {:?}", err);
+        }
+        // guard dropped here
+    });
 
     /*let manager = Arc::new(Mutex::new(
         ClientManager::new(max_sockets).with_port_range(start_port, end_port),

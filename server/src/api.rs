@@ -208,30 +208,23 @@ async fn create_proxy_for(endpoint: &str, state: &web::Data<State>) -> HttpRespo
 
     let secret_key = Arc::new(generate_secret_key(state.secret_key_length as usize));
 
-    let mut manager = state.manager.lock().await;
+    let mut tunnels = state.tunnels.lock().await;
 
-    match manager
-        .put(endpoint.to_string(), secret_key.clone().to_string())
-        .await
-    {
-        Ok(port) => {
-            let schema = if state.secure { "https" } else { "http" };
-            let info = ProxyInfo {
-                id: endpoint.to_string(),
-                port,
-                max_conn_count: state.max_sockets,
-                url: format!("{}://{}.{}", schema, endpoint, state.domain),
-                secret_key: secret_key.clone().to_string(),
-            };
+    tunnels
+        .add_allowed(secret_key.clone().to_string(), endpoint.to_string())
+        .await;
 
-            log::debug!("Proxy info, {:?}", info);
-            HttpResponse::Ok().json(info)
-        }
-        Err(e) => {
-            log::error!("Client manager failed to put proxy endpoint: {:?}", e);
-            HttpResponse::InternalServerError().body(format!("Error: {:?}", e))
-        }
-    }
+    let schema = if state.secure { "https" } else { "http" };
+    let info = ProxyInfo {
+        id: endpoint.to_string(),
+        port: state.tunnel_port,
+        max_conn_count: state.max_sockets,
+        url: format!("{}://{}.{}", schema, endpoint, state.domain),
+        secret_key: secret_key.clone().to_string(),
+    };
+
+    log::debug!("Proxy info, {:?}", info);
+    HttpResponse::Ok().json(info)
 }
 
 fn generate_secret_key(length: usize) -> String {

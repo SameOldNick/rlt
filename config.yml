@@ -9,10 +9,8 @@ secure: false
 max_sockets: 10
 # The port to accept user request for proxying.
 proxy_port: 3001
-# Starting port of the range to allocate for proxying.
-start_port: 
-# Ending port of the range to allocate for proxying.
-end_port: 
+# The port to accept tunnel connections.
+tunnel_port: 4000
 
 # Length of the secret key.
 secret_key_length: 32

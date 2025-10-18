@@ -10,13 +10,12 @@ use hyper::{
 use regex::Regex;
 use tokio::sync::Mutex;
 
-use crate::error::ServerError;
-use crate::state::ClientManager;
+use crate::{error::ServerError, tunnels::Tunnels};
 
 /// Reverse proxy handler
 pub async fn proxy_handler(
     mut req: Request<Incoming>,
-    manager: Arc<Mutex<ClientManager>>,
+    tunnels: Arc<Mutex<Tunnels>>,
 ) -> Result<Response<Incoming>> {
     let host_header = req.headers().get(HOST).ok_or(ServerError::NoHostHeader)?;
     let hostname = host_header.to_str()?;
@@ -25,13 +24,13 @@ pub async fn proxy_handler(
     let endpoint = extract(hostname)?;
 
     let client_stream = {
-        let mut manager = manager.lock().await;
-        let client = manager
-            .clients
-            .get_mut(&endpoint)
-            .ok_or(ServerError::ProxyNotReady)?;
-        let mut client = client.lock().await;
-        client.take().await.ok_or(ServerError::EmptyConnection)?
+        let mut tunnels = tunnels.lock().await;
+
+        tunnels
+            .take(endpoint.as_str())
+            .await
+            .ok_or(ServerError::EmptyConnection)?
+            .stream
     };
     let client_stream = hyper_util::rt::TokioIo::new(client_stream);
 

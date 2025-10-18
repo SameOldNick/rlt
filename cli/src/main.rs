@@ -93,12 +93,10 @@ enum Command {
         /// The port to accept user request for proxying.
         #[arg(long, default_value = "3001")]
         proxy_port: u16,
-        /// Starting port of the range to allocate for proxying.
-        #[arg(short, long, default_value = "0")]
-        start_port: u16,
-        /// Ending port of the range to allocate for proxying.
-        #[arg(short, long, default_value = "0")]
-        end_port: u16,
+
+        /// The port to accept tunnel connections.
+        #[arg(long, default_value = "4000")]
+        tunnel_port: u16,
 
         /// Authentication type, can be none, api_key or cloudflare.
         #[arg(long, default_value = "none")]
@@ -127,6 +125,7 @@ enum Command {
 struct ConfigYaml {
     domain: String,
     port: u16,
+    tunnel_port: u16,
 
     endpoint_min_length: usize,
     endpoint_max_length: usize,
@@ -196,8 +195,7 @@ async fn main() -> Result<()> {
             secure,
             max_sockets,
             proxy_port,
-            start_port,
-            end_port,
+            tunnel_port,
             auth_type,
             auth_api_key,
             auth_cloudflare_account,
@@ -249,6 +247,8 @@ async fn main() -> Result<()> {
                     log,
 
                     api_port: map.port,
+                    tunnel_port: map.tunnel_port,
+
                     secure: map.secure,
                     max_sockets: if map.max_sockets.is_some() {
                         map.max_sockets.unwrap()
@@ -256,16 +256,6 @@ async fn main() -> Result<()> {
                         max_sockets
                     },
                     proxy_port: map.proxy_port,
-                    start_port: if map.start_port.is_some() {
-                        map.start_port.unwrap()
-                    } else {
-                        start_port
-                    },
-                    end_port: if map.end_port.is_some() {
-                        map.end_port.unwrap()
-                    } else {
-                        end_port
-                    },
                     auth_type: map.auth_type,
                     auth_api_key: map.auth_api_key.unwrap_or_default(),
                     auth_cloudflare_account: map.auth_cloudflare_account.unwrap_or_default(),
@@ -301,8 +291,7 @@ async fn main() -> Result<()> {
                     secure,
                     max_sockets,
                     proxy_port,
-                    start_port,
-                    end_port,
+                    tunnel_port,
                     auth_type,
                     auth_api_key: auth_api_key.as_deref().unwrap_or_default().to_string(),
                     auth_cloudflare_account: auth_cloudflare_account

@@ -16,13 +16,16 @@ use tokio::{net::TcpListener, sync::Mutex, time::timeout};
 
 use crate::api::{api_status, create_tunnel, request_endpoint};
 use crate::proxy::proxy_handler;
-use crate::state::{ClientManager, State};
+use crate::state::State;
+use crate::tunnels::Tunnels;
 
 mod api;
 mod auth;
 mod error;
 mod proxy;
 mod state;
+mod tunnel;
+mod tunnels;
 
 /// The interval between cleanup checks
 const CLEANUP_CHECK_INTERVAL: Duration = Duration::from_secs(60);
@@ -43,9 +46,8 @@ pub struct ServerConfig {
     pub api_port: u16,
     pub secure: bool,
     pub max_sockets: u8,
+    pub tunnel_port: u16,
     pub proxy_port: u16,
-    pub start_port: u16,
-    pub end_port: u16,
 
     pub auth_type: String,
     pub auth_api_key: String,
@@ -64,6 +66,7 @@ pub async fn start(config: ServerConfig) -> Result<()> {
         secure,
         max_sockets,
         proxy_port,
+        tunnel_port,
 
         endpoint_min_length,
         endpoint_max_length,
@@ -76,8 +79,6 @@ pub async fn start(config: ServerConfig) -> Result<()> {
         pid_file,
         log,
 
-        start_port,
-        end_port,
         auth_type,
         auth_api_key,
         auth_cloudflare_account,
@@ -199,14 +200,23 @@ pub async fn start(config: ServerConfig) -> Result<()> {
         return Err(error::ServerError::InvalidConfig.into());
     }
 
-    let manager = Arc::new(Mutex::new(
+    let tunnels = Arc::new(Mutex::new(Tunnels::new(tunnel_port)));
+
+    let tunnels_for_listen = Arc::clone(&tunnels);
+
+    let mut guard = tunnels_for_listen.lock().await;
+    guard.listen().await?;
+
+    /*let manager = Arc::new(Mutex::new(
         ClientManager::new(max_sockets).with_port_range(start_port, end_port),
-    ));
+    ));*/
     let api_state = web::Data::new(State {
-        manager: manager.clone(),
+        tunnels: tunnels.clone(),
         max_sockets,
         secure,
         domain,
+
+        tunnel_port,
 
         endpoint_min_length,
         endpoint_max_length,
@@ -229,8 +239,9 @@ pub async fn start(config: ServerConfig) -> Result<()> {
                 Ok(Ok((stream, _))) => {
                     log::info!("Accepted a new proxy request");
 
-                    let proxy_manager = manager.clone();
-                    let service = service_fn(move |req| proxy_handler(req, proxy_manager.clone()));
+                    let tunnels_for_service = Arc::clone(&tunnels);
+                    let service =
+                        service_fn(move |req| proxy_handler(req, tunnels_for_service.clone()));
 
                     tokio::spawn(async move {
                         if let Err(err) = http1::Builder::new()
@@ -245,8 +256,8 @@ pub async fn start(config: ServerConfig) -> Result<()> {
                 Ok(Err(e)) => log::error!("Failed to accept the request: {:?}", e),
                 Err(_) => {
                     // timeout, cleanup old connections
-                    let mut manager = manager.lock().await;
-                    manager.cleanup().await;
+                    let mut tunnels = tunnels.lock().await;
+                    tunnels.shutdown().await;
                 }
             }
         }

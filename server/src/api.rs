@@ -206,13 +206,23 @@ async fn create_proxy_for(endpoint: &str, state: &web::Data<State>) -> HttpRespo
         }
     }
 
+    log::debug!("Generating secret key for {}", endpoint);
+
     let secret_key = Arc::new(generate_secret_key(state.secret_key_length as usize));
+
+    log::debug!(
+        "Adding allowed endpoint {} with secret key {}",
+        endpoint,
+        secret_key
+    );
 
     let mut tunnels = state.tunnels.lock().await;
 
     tunnels
         .add_allowed(secret_key.clone().to_string(), endpoint.to_string())
         .await;
+
+    log::debug!("Allowed endpoint {} added successfully", endpoint);
 
     let schema = if state.secure { "https" } else { "http" };
     let info = ProxyInfo {
